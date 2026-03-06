@@ -21,7 +21,7 @@
 #     nix flake init -t your-flake#minimal
 #
 {
-  description = "A minimal Nix project template that uses scaffold.nix";
+  description = "A minimal Nix flake template that uses scaffold.nix";
 
   inputs = {
     # pinned to stable for now

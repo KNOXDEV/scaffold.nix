@@ -101,10 +101,13 @@ let
     exportOverlays = exports.overlays or (context: {});
     exportShells = exports.shells or (context: {});
 
-    # Unlike the others, there IS a default function for exporting checks since its almost always desired.
-    # However, if your checks are in a nested structure,
+    # Unlike the others, there IS a default function for exporting checks
+    # since its almost always desired. However, if your checks are in a nested structure,
     # you will get errors from `nix` and need to implement your own flattening.
     exportChecks = exports.checks or (context: context.checks);
+    # Similar default export for templates. It doesn't supporting a hierarchical directory
+    # structure but you may want to override its behavior anyways.
+    exportTemplates = exports.templates or (context: context.templates);
 
     # Gather internal libraries
     libTree = getImportableTree (src + /lib);
@@ -204,7 +207,7 @@ let
       overlays = internalOverlays;
       systems = internalNixosConfigs;
       packages = packageTree;
-      templates = templatesTree;
+      templates = internalTemplates;
       lib = internalLibsDefaultFlattened;
     };
 
@@ -266,7 +269,7 @@ let
 
       # libs and templates are all exported by default
       lib = internalLibsDefaultFlattened;
-      templates = internalTemplates;
+      templates = exportTemplates allFlakeContext;
     };
   in
     # finally, form the final flake structure

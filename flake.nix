@@ -1,5 +1,5 @@
 {
-  description = "Nix Flake scaffold that provides immediate productivity with self-hosting with Nix.";
+  description = "Nix Flake scaffold that provides immediate productivity with using Nix, without abstraction.";
 
   inputs = {
     # pinned to stable for now
@@ -60,6 +60,7 @@
         };
 
         # Top-level output. Map internal NixOS configurations to flake outputs.
+        # See README.md for a full explanation of how to interact with this.
         nixosConfigurations = {systems, ...}: {
           example-host = systems.example-host;
         };
@@ -79,6 +80,18 @@
         # After this, `nix develop .#dev` will work.
         shells = {shells, ...}: {
           dev = shells.dev;
+        };
+
+        # Templates are exported by default (all of them),
+        # so this is only needed if you want to modify the output.
+        templates = {templates,...}: {
+          minimal = templates.minimal;
+
+          # We can even export a template of ourselves (which we do).
+          default = {
+            description = "Maximalist flake scaffold that provides immediate productivity with using Nix";
+            path = ./.;
+          };
         };
       };
     };
