@@ -79,7 +79,7 @@ nixos-rebuild build-vm --flake .#example-host && ./result/bin/run-example-host-v
 ## Customizing the NixOS configuration
 
 NixOS has thousands of built-in options for configuring services, networking, users, and more. 
-You enable features declaratively in your system configuration files under `systems/`.
+You enable features declaratively in your system configuration files under [`systems/`](systems/).
 
 For example, to run a [Vaultwarden](https://github.com/dani-garcia/vaultwarden) password manager on your server, add this to your host configuration:
 
@@ -99,7 +99,7 @@ The recommended way to discover what options are available is to use Ctrl+F in t
 
 ## Whats in this repo
 
-The scaffold uses **convention-over-configuration**: where you place a file determines what it is. The core engine in `lib/scaffold.nix` scans the directory tree and automatically discovers all Nix expressions, wiring them together into a complete flake.
+The scaffold uses **convention-over-configuration**: where you place a file determines what it is. The core engine in [`lib/scaffold.nix`](lib/scaffold.nix) scans the directory tree and automatically discovers all Nix expressions, wiring them together into a complete flake.
 
 ### Directory structure
 
@@ -134,35 +134,35 @@ The scaffold uses **convention-over-configuration**: where you place a file dete
 
 ### How it hooks together
 
-`flake.nix` calls `mkFlake`, which does the following:
+[`flake.nix`](flake.nix) calls `mkFlake`, which does the following:
 
 1. **Discovery** -- scans each directory (`packages/`, `modules/nixos/`, `overlays/`, etc.) for `.nix` files and directories containing `default.nix`. Subdirectory nesting creates nested namespaces.
 2. **Processing** -- imports and evaluates libraries and overlays, builds a universal overlay that makes all internal packages available under `pkgs.internal.*`, and assembles NixOS system configurations.
-3. **Export** -- your `exports` block in `flake.nix` controls exactly which internal items become public flake outputs. Only what you explicitly map gets exported (with the exception of `checks`, `templates`, and `lib`, which are exported by default).
+3. **Export** -- your `exports` block in [`flake.nix`](flake.nix) controls exactly which internal items become public flake outputs. Only what you explicitly map gets exported (with the exception of `checks`, `templates`, and `lib`, which are exported by default).
 
 ### Flake primitives
 
 Each directory corresponds to a Nix flake primitive:
 
-**[Packages](https://wiki.nixos.org/wiki/Packaging)** (`packages/`) -- Standard `callPackage`-compatible Nix expressions. Drop a `.nix` file or a `directory/default.nix` and it becomes available as `pkgs.internal.<name>`. Nested directories create nested scopes (e.g., `packages/tools/lint.nix` becomes `pkgs.internal.tools.lint`). Export them in your `exports.packages` function to make them available via `nix build`.
+**[Packages](https://wiki.nixos.org/wiki/Packaging)** ([`packages/`](packages/)) -- Standard `callPackage`-compatible Nix expressions. Drop a `.nix` file (e.g., [`hello.nix`](packages/hello.nix)) or a `directory/default.nix` (e.g., [`greeter/`](packages/greeter/default.nix)) and it becomes available as `pkgs.internal.<name>`. Nested directories create nested scopes (e.g., `packages/tools/lint.nix` becomes `pkgs.internal.tools.lint`). Export them in your `exports.packages` function to make them available via `nix build`.
 
-**[NixOS Modules](https://wiki.nixos.org/wiki/NixOS_modules)** (`modules/nixos/`) -- Standard NixOS modules following the `options`/`config` pattern. They receive the usual NixOS arguments (`config`, `lib`, `pkgs`) plus all flake context via `specialArgs`, meaning you can access `inputs`, `modules`, `overlays`, etc. directly. Import them in your system configurations via the `modules.nixos` tree.
+**[NixOS Modules](https://wiki.nixos.org/wiki/NixOS_modules)** ([`modules/nixos/`](modules/nixos/)) -- Standard NixOS modules following the `options`/`config` pattern (see [`example.nix`](modules/nixos/example.nix)). They receive the usual NixOS arguments (`config`, `lib`, `pkgs`) plus all flake context via `specialArgs`, meaning you can access `inputs`, `modules`, `overlays`, etc. directly. Import them in your system configurations via the `modules.nixos` tree.
 
-**[Overlays](https://wiki.nixos.org/wiki/Overlays)** (`overlays/`) -- Nixpkgs overlays in the standard `final: prev: { ... }` form. If your overlay needs flake context (like access to internal package paths), write it as a function that accepts the context and returns the overlay. A universal overlay (`overlays.default`) is generated automatically -- it provides `pkgs.internal.*`, `pkgs.lib.internal.*`, and `pkgs.inputs`. Avoid naming your own overlay `default.nix` as it would replace this.
+**[Overlays](https://wiki.nixos.org/wiki/Overlays)** ([`overlays/`](overlays/)) -- Nixpkgs overlays in the standard `final: prev: { ... }` form (see [`example.nix`](overlays/example.nix)). If your overlay needs flake context (like access to internal package paths), write it as a function that accepts the context and returns the overlay. A universal overlay (`overlays.default`) is generated automatically -- it provides `pkgs.internal.*`, `pkgs.lib.internal.*`, and `pkgs.inputs`. Avoid naming your own overlay `default.nix` as it would replace this.
 
-**[System Configurations](https://wiki.nixos.org/wiki/NixOS_system_configuration)** (`systems/<arch>/<hostname>/`) -- Full NixOS configurations. The architecture is inferred from the parent directory name. Each host gets the universal overlay applied and receives all flake context through `specialArgs`, so you can import internal modules and reference `pkgs.internal.*` packages directly.
+**[System Configurations](https://wiki.nixos.org/wiki/NixOS_system_configuration)** ([`systems/`](systems/)) -- Full NixOS configurations (see [`example-host`](systems/x86_64-linux/example-host/default.nix)). The architecture is inferred from the parent directory name. Each host gets the universal overlay applied and receives all flake context through `specialArgs`, so you can import internal modules and reference `pkgs.internal.*` packages directly.
 
-**[Development Shells](https://wiki.nixos.org/wiki/Development_environment_with_nix-shell)** (`shells/`) -- Development environments created with `mkShell`. They receive per-system context including `pkgs` with the universal overlay applied. Export them via `exports.shells` to use with `nix develop`.
+**[Development Shells](https://wiki.nixos.org/wiki/Development_environment_with_nix-shell)** ([`shells/`](shells/)) -- Development environments created with `mkShell` (see [`dev.nix`](shells/dev.nix)). They receive per-system context including `pkgs` with the universal overlay applied. Export them via `exports.shells` to use with `nix develop`.
 
-**[Checks](https://wiki.nixos.org/wiki/Flakes#Output_schema)** (`checks/`) -- Derivations that run as part of `nix flake check`. They receive per-system context. All checks are exported by default.
+**[Checks](https://wiki.nixos.org/wiki/Flakes#Output_schema)** ([`checks/`](checks/)) -- Derivations that run as part of `nix flake check` (see [`example.nix`](checks/example.nix)). They receive per-system context. All checks are exported by default.
 
-**[Libraries](https://wiki.nixos.org/wiki/Flakes#Output_schema)** (`lib/`) -- Shared Nix functions available throughout the flake. `lib/default.nix` is special: its exports are merged into the root `lib` namespace. Other files are nested under their filename (e.g., `lib/helpers.nix` becomes `lib.helpers.*`). Libraries are always exported at the top level.
+**[Libraries](https://wiki.nixos.org/wiki/Flakes#Output_schema)** ([`lib/`](lib/)) -- Shared Nix functions available throughout the flake. [`lib/default.nix`](lib/default.nix) is special: its exports are merged into the root `lib` namespace. Other files are nested under their filename (e.g., [`lib/helpers.nix`](lib/helpers.nix) becomes `lib.helpers.*`). Libraries are always exported at the top level.
 
-**[Templates](https://wiki.nixos.org/wiki/Flakes#Output_schema)** (`templates/`) -- Each subdirectory with a `flake.nix` becomes a template. Templates are exported by default. Consumers can initialize from them with `nix flake init -t your-flake#template-name`.
+**[Templates](https://wiki.nixos.org/wiki/Flakes#Output_schema)** ([`templates/`](templates/)) -- Each subdirectory with a `flake.nix` becomes a template (see [`minimal`](templates/minimal/flake.nix)). Templates are exported by default. Consumers can initialize from them with `nix flake init -t your-flake#template-name`.
 
 ### The exports block
 
-The `exports` attrset in your `flake.nix` is the single point of control for what becomes a public flake output. Each key is a function that receives context and returns the outputs to expose:
+Everything internal to your flake can generally access anything else via the context that the scaffold passes around. The `exports` attrset in your [`flake.nix`](flake.nix) is the single point of control for what becomes a public flake output. Each key is a function that receives context and returns the outputs to expose:
 
 ```nix
 exports = {
