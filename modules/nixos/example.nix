@@ -10,20 +10,28 @@
 #     modules/nixos/my-service/default.nix -> modules.nixos.my-service
 #
 # HOW MODULES RECEIVE CONTEXT:
-#   NixOS modules in the scaffold receive `allFlakeContext` via `specialArgs`.
+#   Each module is wrapped by the scaffold so that, regardless of who imports
+#   it, two things are true:
+#
+#     1. The universal overlay is applied to `pkgs`, so `pkgs.internal.*`,
+#        `pkgs.lib.internal.*`, and `pkgs.inputs` all resolve.
+#     2. Flake context is injected as module arguments (with `mkDefault`
+#        priority, so a downstream consumer's own specialArgs take precedence).
+#
 #   This means your module function can destructure any of:
 #
 #     { config, lib, pkgs, ... }          # Standard NixOS module args
-#     { inputs, modules, overlays,        # From allFlakeContent (specialArgs)
+#     { inputs, modules, overlays,        # Injected by the scaffold wrapper
 #       systems, packages, ... }
 #
-#   Additionally, because the universal overlay is applied to all NixOS
-#   configurations, `pkgs.internal.*` is available for referencing your
-#   internal packages directly.
+#   The wrapping applies identically whether this module is consumed by one of
+#   the flake's own systems/ configurations OR imported by a downstream flake
+#   through the `nixosModules` output, so it is safe to reference
+#   `pkgs.internal.*` in option defaults below.
 #
 # HOW TO USE MODULES IN SYSTEM CONFIGURATIONS:
 #   In your system config (e.g., systems/x86_64-linux/example-host/default.nix),
-#   import modules from the module tree passed via specialArgs:
+#   import modules from the module tree passed as a module argument:
 #
 #     { modules, ... }: {
 #       imports = with modules.nixos; [

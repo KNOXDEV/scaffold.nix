@@ -179,9 +179,25 @@ let
     # Gather all NixOS Modules recursively. We don't have to import them manually
     # because the NixOS module system will do that for us.
     nixosModuleTree = getImportableTree (src + /modules/nixos);
-    # TODO: Currently, we oversimplify and do not augment these modules in such a way that they can
-    # be used independently from the internal NixOSConfigurations (like we do with overlays).
-    internalNixosModules = nixosModuleTree;
+
+    # Wrap each module path so it behaves identically whether it is consumed
+    # inside our own nixosConfigurations or imported from an external flake
+    # via the nixosModules output, ie the universal overlay is applied,
+    # so `pkgs.${namespace}.*` resolves.
+    processNixosModules = _: modulePath: {...}: {
+      imports = [
+        {nixpkgs.overlays = [internalOverlays.default];}
+        modulePath
+      ];
+      # Flake context (inputs, modules, packages, ...) is exposed as module
+      # args via `_module.args`. We mark them with `mkDefault` so a consumer
+      # that already passes their own e.g. `inputs` via specialArgs wins.
+      _module.args =
+        builtins.mapAttrs
+        (_: nixpkgs.lib.mkDefault)
+        (builtins.removeAttrs allFlakeContext ["lib"]);
+    };
+    internalNixosModules = mapAttrsRecursive processNixosModules nixosModuleTree;
 
     # parse systems folder and generate NixOS configs while providing custom modules
     systemsTree = getSubDirectories (src + /systems);
