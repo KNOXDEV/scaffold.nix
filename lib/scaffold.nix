@@ -50,35 +50,65 @@ let
 
   # Recursively scans `dir` for regular files ending in `suffix`.
   # Returns a tree { fileName-without-suffix = path; dirName = { ... }; ... }
-  # mirroring the filesystem. A subdirectory containing a `default<suffix>`
-  # file collapses to a single entry whose path is the directory itself --
-  # this is what makes `import ./foo` resolve for `.nix`; for other suffixes
-  # the collapse only triggers if you actually name a file `default.<suffix>`.
-  # Returns {} when `dir` is missing.
-  scanDir = suffix: dir: let
-    entries = readDirSafe dir;
-    suffixLen = builtins.stringLength suffix;
-    toEntry = name: type: let
-      subPath = dir + "/${name}";
-      isMatchingFile = type == "regular" && hasSuffix suffix name;
-      isDirectory = type == "directory";
-      withoutSuffix = builtins.substring 0 ((builtins.stringLength name) - suffixLen) name;
-      defaultExists = builtins.pathExists (subPath + "/default${suffix}");
-      dirContent = scanDir suffix subPath;
+  # mirroring the filesystem. `suffix` must start with `.` (e.g. ".nix",
+  # ".age") so the stripped key is a clean attribute name.
+  #
+  # Does NOT collapse `dir/default<suffix>` to the directory path -- the
+  # collapse silently drops sibling files (e.g. `./secrets/foo/default.age`
+  # alongside `./secrets/foo/other.age` would lose `other.age`). The internal
+  # `.nix` alias adds the collapse separately because `import ./dir`
+  # auto-resolves `default.nix`.
+  #
+  # Returns {} when `dir` is missing. Bounded recursion depth guards against
+  # filesystem symlink cycles.
+  scanDir = suffix: dir:
+    if builtins.substring 0 1 suffix != "."
+    then throw "scaffold.scanDir: suffix must start with '.', got: ${suffix}"
+    else scanDirAtDepth 64 suffix dir;
+
+  scanDirAtDepth = depth: suffix: dir:
+    if depth <= 0
+    then throw "scaffold.scanDir: directory recursion limit exceeded at ${toString dir} -- check for a symlink cycle."
+    else let
+      entries = readDirSafe dir;
+      suffixLen = builtins.stringLength suffix;
+      toEntry = name: type: let
+        subPath = dir + "/${name}";
+        isMatchingFile = type == "regular" && hasSuffix suffix name;
+        isDirectory = type == "directory";
+        withoutSuffix = builtins.substring 0 ((builtins.stringLength name) - suffixLen) name;
+        dirContent = scanDirAtDepth (depth - 1) suffix subPath;
+      in
+        # Silently skip files literally named `.<suffix>` -- their stripped
+        # key would be the empty string, which can't be addressed downstream.
+        if isMatchingFile && withoutSuffix != ""
+        then {${withoutSuffix} = subPath;}
+        else if isDirectory && !isEmptySet dirContent
+        then {${name} = dirContent;}
+        else {};
     in
-      if isMatchingFile
-      then {${withoutSuffix} = subPath;}
-      else if isDirectory && defaultExists
-      then {${name} = subPath;}
-      else if isDirectory && !isEmptySet dirContent
-      then {${name} = dirContent;}
-      else {};
-  in
-    mergeFold toEntry entries;
+      mergeFold toEntry entries;
+
+  # Collapse `{ default = <path>; ... }` to just `<path>`, mirroring how
+  # `import ./dir` auto-resolves `dir/default.nix`. Internal only; applied
+  # by `getImportableTree`. The collapse intentionally drops siblings next
+  # to a `default.nix` -- this matches the long-standing nix convention
+  # that `default.nix` is THE entry point for a directory.
+  collapseDefaults = tree:
+    builtins.mapAttrs (_: value:
+      if builtins.isAttrs value
+      then let
+        recursed = collapseDefaults value;
+      in
+        if recursed ? default && !builtins.isAttrs recursed.default
+        then recursed.default
+        else recursed
+      else value)
+    tree;
 
   # Scanning for `.nix` files is the scaffold's bread and butter, so we
-  # keep a named alias for internal use.
-  getImportableTree = scanDir ".nix";
+  # keep a named alias for internal use. Applies the `default.nix` collapse.
+  getImportableTree = dir: collapseDefaults (scanDir ".nix" dir);
 
   # Borrowed from flake-utils.
   # A common case is to build the same structure for each system.
@@ -116,8 +146,16 @@ let
     # level so that the scaffold's context has a statically-known keyset.
     # This means downstream consumers can destructure their args naturally
     # (`{src, inputs, extra, ...}: ...`) without triggering an infinite
-    # recursion during the destructure-existence check. The one rule:
-    # don't reference `ctx.extra` from inside `extraContext` itself.
+    # recursion during the destructure-existence check.
+    #
+    # The recursion rule: don't reference any field whose evaluation closes
+    # the loop back to `extraContext` from inside it. The obvious one is
+    # `ctx.extra`. But the same hazard applies to anything that evaluates a
+    # wrapped NixOS module -- `ctx.systems`, or `ctx.modules.nixos` if you
+    # try to instantiate a module from it -- because every wrapped module
+    # imports the context module that itself forces `extra`. In practice,
+    # safe inputs to `extraContext` are `src`, `inputs`, `lib`, `packages`
+    # (paths only), `templates`, `overlays`.
     extraContext = config.extraContext or (_: {});
 
     exportPackages = exports.packages or (context: {});
@@ -205,22 +243,39 @@ let
     # because the NixOS module system will do that for us.
     nixosModuleTree = getImportableTree (src + /modules/nixos);
 
+    # A single module that applies the universal overlay and exposes the
+    # flake context as module args. Every wrapped module imports this same
+    # value; the explicit `key` tells the NixOS module system to deduplicate
+    # it when N>1 wrapped modules are imported into the same configuration.
+    #
+    # Without the dedup, each wrapper would write `_module.args.<name>`
+    # independently. `_module.args` is `lazyAttrsOf raw`; `raw` rejects
+    # multiple definitions of the same key, so importing two wrapped modules
+    # (e.g. `imports = with modules.nixos; [example hardware.gpu]`) would
+    # fail with "_module.args.inputs is defined multiple times".
+    #
+    # specialArgs (when used by callers of nixosSystem) still wins over the
+    # _module.args set here, because nixpkgs resolves module function args
+    # as `specialArgs.${name} or config._module.args.${name}`.
+    scaffoldContextModule = {
+      _file = "${toString src}/lib/scaffold.nix";
+      key = "scaffold:context:${toString src}";
+      config = {
+        nixpkgs.overlays = [internalOverlays.default];
+        _module.args = builtins.removeAttrs allFlakeContext ["lib"];
+      };
+    };
+
     # Wrap each module path so it behaves identically whether it is consumed
     # inside our own nixosConfigurations or imported from an external flake
-    # via the nixosModules output, ie the universal overlay is applied,
-    # so `pkgs.${namespace}.*` resolves.
-    processNixosModules = _: modulePath: {...}: {
+    # via the nixosModules output -- the universal overlay is applied,
+    # `pkgs.${namespace}.*` resolves, and flake context is available as args.
+    processNixosModules = _: modulePath: {
+      _file = toString modulePath;
       imports = [
-        {nixpkgs.overlays = [internalOverlays.default];}
+        scaffoldContextModule
         modulePath
       ];
-      # Flake context (inputs, modules, packages, ...) is exposed as module
-      # args via `_module.args`. We mark them with `mkDefault` so a consumer
-      # that already passes their own e.g. `inputs` via specialArgs wins.
-      _module.args =
-        builtins.mapAttrs
-        (_: nixpkgs.lib.mkDefault)
-        (builtins.removeAttrs allFlakeContext ["lib"]);
     };
     internalNixosModules = mapAttrsRecursive processNixosModules nixosModuleTree;
 
@@ -277,9 +332,26 @@ let
       lib = prev.lib // {${namespace} = internalLibsDefaultFlattened;};
       # Merge with any existing namespace scope so multiple scaffold flakes can
       # coexist in the same pkgs (e.g. a downstream flake importing a module
-      # from an upstream scaffold flake using the same namespace). Per-package
-      # name collisions still resolve last-write-wins.
-      ${namespace} = (prev.${namespace} or {}) // createNestedScopes prev packageTree;
+      # from an upstream scaffold flake using the same namespace).
+      #
+      # Merge order: our packages on the left, the existing scope on the
+      # right -- so downstream wins per-package-name. This is the safer
+      # default: if a downstream scaffold has already populated
+      # `pkgs.${namespace}.greeter`, an upstream wrapped module that closes
+      # over `pkgs.${namespace}.greeter` will see downstream's. The scope
+      # machinery (`callPackage`, `newScope`, `overrideScope'`) on the right
+      # also wins, which preserves downstream's ability to override.
+      #
+      # If `prev.${namespace}` exists but isn't an attrset we throw rather
+      # than silently dropping it -- it's almost certainly a namespace
+      # config conflict the user wants to know about.
+      ${namespace} = let
+        existing = prev.${namespace} or {};
+      in
+        if !builtins.isAttrs existing
+        then
+          throw "scaffold: pkgs.${namespace} is already set to a non-attrset value; choose a different `namespace` in mkFlake to avoid the conflict."
+        else createNestedScopes prev packageTree // existing;
     };
 
     # we apply the universal overlay to nixosConfigurations via this universal module.

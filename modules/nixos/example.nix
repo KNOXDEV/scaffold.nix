@@ -15,8 +15,11 @@
 #
 #     1. The universal overlay is applied to `pkgs`, so `pkgs.internal.*`,
 #        `pkgs.lib.internal.*`, and `pkgs.inputs` all resolve.
-#     2. Flake context is injected as module arguments (with `mkDefault`
-#        priority, so a downstream consumer's own specialArgs take precedence).
+#     2. Flake context is injected as module arguments. The wrapper routes
+#        all wrapped modules through one shared sentinel module so that
+#        importing several wrapped modules at once doesn't collide on
+#        `_module.args`. A downstream consumer's `specialArgs` still takes
+#        precedence over what the wrapper provides.
 #
 #   This means your module function can destructure any of:
 #
