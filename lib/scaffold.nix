@@ -275,7 +275,11 @@ let
     defaultUniversalOverlay = final: prev: {
       inputs = inputs;
       lib = prev.lib // {${namespace} = internalLibsDefaultFlattened;};
-      ${namespace} = createNestedScopes prev packageTree;
+      # Merge with any existing namespace scope so multiple scaffold flakes can
+      # coexist in the same pkgs (e.g. a downstream flake importing a module
+      # from an upstream scaffold flake using the same namespace). Per-package
+      # name collisions still resolve last-write-wins.
+      ${namespace} = (prev.${namespace} or {}) // createNestedScopes prev packageTree;
     };
 
     # we apply the universal overlay to nixosConfigurations via this universal module.
