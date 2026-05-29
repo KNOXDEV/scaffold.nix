@@ -96,11 +96,18 @@ let
 
     exports = config.exports or {};
     # Optional hook to extend the context object that gets threaded through libs,
-    # overlays, modules, systems, and exports. Receives `allFlakeContext` and
-    # returns an attrset to merge in. Use this when you have a project-specific
-    # convention the scaffold doesn't know about (e.g., agenix `.age` files in
-    # ./secrets, home-manager configs in ./homes) and you don't want to fork.
-    # Scaffold-provided keys win on conflict; user keys are additive.
+    # overlays, modules, systems, and exports. Receives the full context and
+    # returns an attrset whose contents are exposed under `context.extra.*`.
+    # Use this when you have a project-specific convention the scaffold doesn't
+    # know about (e.g., agenix `.age` files in ./secrets, home-manager configs
+    # in ./homes) and you don't want to fork.
+    #
+    # The output is namespaced under `extra` rather than merged at the top
+    # level so that the scaffold's context has a statically-known keyset.
+    # This means downstream consumers can destructure their args naturally
+    # (`{src, inputs, extra, ...}: ...`) without triggering an infinite
+    # recursion during the destructure-existence check. The one rule:
+    # don't reference `ctx.extra` from inside `extraContext` itself.
     extraContext = config.extraContext or (_: {});
 
     exportPackages = exports.packages or (context: {});
@@ -225,20 +232,20 @@ let
 
     # This gets passed to basically everything as additional context.
     # You can very easily recurse infinitely if you reference something you shouldn't.
-    # User-supplied `extraContext` is merged in first so that scaffold-provided
-    # keys (inputs, modules, overlays, ...) take precedence on conflict.
-    allFlakeContext =
-      (extraContext allFlakeContext)
-      // {
-        inputs = inputs;
-        src = src;
-        modules.nixos = internalNixosModules;
-        overlays = internalOverlays;
-        systems = internalNixosConfigs;
-        packages = packageTree;
-        templates = internalTemplates;
-        lib = internalLibsDefaultFlattened;
-      };
+    # Note that the scaffold's keys are statically known here; user extensions
+    # live under `extra` (a single key whose value is the lazy user attrset).
+    # See the `extraContext` doc comment above for why.
+    allFlakeContext = {
+      inputs = inputs;
+      src = src;
+      modules.nixos = internalNixosModules;
+      overlays = internalOverlays;
+      systems = internalNixosConfigs;
+      packages = packageTree;
+      templates = internalTemplates;
+      lib = internalLibsDefaultFlattened;
+      extra = extraContext allFlakeContext;
+    };
 
     # Recursively generates new nested package scopes for each subtree.
     createNestedScopes = super: tree: let

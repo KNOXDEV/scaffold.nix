@@ -205,8 +205,14 @@ mkFlake {
 }
 ```
 
-The returned attrset is merged into the flake context, so everything downstream (`lib/`, overlays, modules, systems, exports) can reference it. For the example above, a NixOS module can write `age.secrets.foo.file = secrets.foo;` directly, the same way it would reference `inputs` or `packages`.
+The returned attrset is exposed to everything downstream (`lib/`, overlays, modules, systems, exports) under `extra.*`. For the example above, a NixOS module would write:
 
-Note that the `lib` you receive in the context is the scaffold's *internal* lib (what gets exposed under `lib.${namespace}` in modules), not nixpkgs's lib. Reach for `inputs.nixpkgs.lib` when you need helpers like `mapAttrs'` or `filterAttrs`.
+```nix
+{ extra, ... }: {
+  age.secrets.foo.file = extra.secrets.foo;
+}
+```
 
-`extraContext` receives the full context (lazily), so user-defined entries can reference each other and the scaffold's own keys. Scaffold-provided keys (`inputs`, `modules`, `overlays`, `systems`, `packages`, `templates`, `lib`, `src`) take precedence on conflict -- `extraContext` is additive.
+**Why the `extra` namespace?** The scaffold puts your additions under a single statically-known key rather than merging them at the top level. This keeps the context's keyset known up front, which means downstream consumers can destructure their args naturally (`{ src, inputs, extra, ... }: ...`) without triggering an infinite recursion during the pattern-match's existence check. The one rule to remember: **don't reference `ctx.extra` from inside `extraContext` itself** -- that would re-introduce the cycle.
+
+Also note the `lib` you receive is the scaffold's *internal* lib (what gets exposed under `lib.${namespace}` in modules), not nixpkgs's lib. Reach for `inputs.nixpkgs.lib` when you need helpers like `mapAttrs'` or `filterAttrs`.
