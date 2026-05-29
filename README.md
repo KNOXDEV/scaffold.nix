@@ -176,3 +176,37 @@ exports = {
   overlays            = { overlays, ... }: { example = overlays.example; };
 };
 ```
+
+### Extending the context (`extraContext`)
+
+The scaffold ships with a fixed set of conventions (`packages/`, `modules/`, `overlays/`, ...). When your project has its own convention -- say, [agenix](https://github.com/ryantm/agenix) secrets in `./secrets/`, or home-manager configurations in `./homes/` -- you can plug it in without forking the scaffold by supplying an `extraContext` function:
+
+```nix
+mkFlake {
+  inherit inputs;
+  src = ./.;
+
+  extraContext = { src, inputs, ... }: {
+    # crawl ./secrets/*.age and expose each as a path
+    secrets = let
+      nixlib = inputs.nixpkgs.lib;
+      dir = src + /secrets;
+      entries = builtins.readDir dir;
+      ageFiles = nixlib.filterAttrs (n: t: t == "regular" && nixlib.hasSuffix ".age" n) entries;
+    in
+      nixlib.mapAttrs' (name: _:
+        nixlib.nameValuePair
+          (nixlib.removeSuffix ".age" name)
+          (dir + "/${name}"))
+        ageFiles;
+  };
+
+  exports = { ... };
+}
+```
+
+The returned attrset is merged into the flake context, so everything downstream (`lib/`, overlays, modules, systems, exports) can reference it. For the example above, a NixOS module can write `age.secrets.foo.file = secrets.foo;` directly, the same way it would reference `inputs` or `packages`.
+
+Note that the `lib` you receive in the context is the scaffold's *internal* lib (what gets exposed under `lib.${namespace}` in modules), not nixpkgs's lib. Reach for `inputs.nixpkgs.lib` when you need helpers like `mapAttrs'` or `filterAttrs`.
+
+`extraContext` receives the full context (lazily), so user-defined entries can reference each other and the scaffold's own keys. Scaffold-provided keys (`inputs`, `modules`, `overlays`, `systems`, `packages`, `templates`, `lib`, `src`) take precedence on conflict -- `extraContext` is additive.

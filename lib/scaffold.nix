@@ -95,6 +95,14 @@ let
     nixpkgs = config.nixpkgs or inputs.nixpkgs;
 
     exports = config.exports or {};
+    # Optional hook to extend the context object that gets threaded through libs,
+    # overlays, modules, systems, and exports. Receives `allFlakeContext` and
+    # returns an attrset to merge in. Use this when you have a project-specific
+    # convention the scaffold doesn't know about (e.g., agenix `.age` files in
+    # ./secrets, home-manager configs in ./homes) and you don't want to fork.
+    # Scaffold-provided keys win on conflict; user keys are additive.
+    extraContext = config.extraContext or (_: {});
+
     exportPackages = exports.packages or (context: {});
     exportNixosModules = exports.nixosModules or (context: {});
     exportNixosConfigurations = exports.nixosConfigurations or (context: {});
@@ -217,15 +225,20 @@ let
 
     # This gets passed to basically everything as additional context.
     # You can very easily recurse infinitely if you reference something you shouldn't.
-    allFlakeContext = {
-      inputs = inputs;
-      modules.nixos = internalNixosModules;
-      overlays = internalOverlays;
-      systems = internalNixosConfigs;
-      packages = packageTree;
-      templates = internalTemplates;
-      lib = internalLibsDefaultFlattened;
-    };
+    # User-supplied `extraContext` is merged in first so that scaffold-provided
+    # keys (inputs, modules, overlays, ...) take precedence on conflict.
+    allFlakeContext =
+      (extraContext allFlakeContext)
+      // {
+        inputs = inputs;
+        src = src;
+        modules.nixos = internalNixosModules;
+        overlays = internalOverlays;
+        systems = internalNixosConfigs;
+        packages = packageTree;
+        templates = internalTemplates;
+        lib = internalLibsDefaultFlattened;
+      };
 
     # Recursively generates new nested package scopes for each subtree.
     createNestedScopes = super: tree: let
