@@ -9,5 +9,5 @@
 #   (with `lib` containing all sibling libraries). This means you can reference functions from
 #   scaffold.nix or other library files.
 {lib, ...}: {
-  inherit (lib.scaffold) mkFlake;
+  inherit (lib.scaffold) mkFlake scanDir;
 }

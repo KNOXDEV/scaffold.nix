@@ -186,24 +186,16 @@ mkFlake {
   inherit inputs;
   src = ./.;
 
-  extraContext = { src, inputs, ... }: {
-    # crawl ./secrets/*.age and expose each as a path
-    secrets = let
-      nixlib = inputs.nixpkgs.lib;
-      dir = src + /secrets;
-      entries = builtins.readDir dir;
-      ageFiles = nixlib.filterAttrs (n: t: t == "regular" && nixlib.hasSuffix ".age" n) entries;
-    in
-      nixlib.mapAttrs' (name: _:
-        nixlib.nameValuePair
-          (nixlib.removeSuffix ".age" name)
-          (dir + "/${name}"))
-        ageFiles;
+  # crawl ./secrets/*.age and expose each as a path under `extra.secrets.<name>`
+  extraContext = { src, ... }: {
+    secrets = inputs.scaffold.lib.scanDir ".age" (src + /secrets);
   };
 
   exports = { ... };
 }
 ```
+
+`scanDir` is the same directory walker the scaffold uses internally on `.nix` files, exposed publicly so you can apply the same convention to your own filename-based discovery (`.age`, `.gql`, `.toml`, ...). It recurses, so `./secrets/postgres/foo.age` becomes `extra.secrets.postgres.foo`.
 
 The returned attrset is exposed to everything downstream (`lib/`, overlays, modules, systems, exports) under `extra.*`. For the example above, a NixOS module would write:
 
@@ -215,4 +207,4 @@ The returned attrset is exposed to everything downstream (`lib/`, overlays, modu
 
 **Why the `extra` namespace?** The scaffold puts your additions under a single statically-known key rather than merging them at the top level. This keeps the context's keyset known up front, which means downstream consumers can destructure their args naturally (`{ src, inputs, extra, ... }: ...`) without triggering an infinite recursion during the pattern-match's existence check. The one rule to remember: **don't reference `ctx.extra` from inside `extraContext` itself** -- that would re-introduce the cycle.
 
-Also note the `lib` you receive is the scaffold's *internal* lib (what gets exposed under `lib.${namespace}` in modules), not nixpkgs's lib. Reach for `inputs.nixpkgs.lib` when you need helpers like `mapAttrs'` or `filterAttrs`.
+Also note the `lib` you receive is the scaffold's *internal* lib (what gets exposed under `lib.${namespace}` in modules), not nixpkgs's lib. Reach for `inputs.nixpkgs.lib` (or `inputs.scaffold.lib` for the helpers above) when you need them.

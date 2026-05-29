@@ -48,27 +48,37 @@ let
   in
     mergeFold toDirectories entries;
 
-  # Recursively determines all importable nix paths within a directory.
-  # Returns a tree-like { filename1: ./filename1.nix, dirname1: {...}, ... } that mirrors the filesystem.
-  getImportableTree = dir: let
+  # Recursively scans `dir` for regular files ending in `suffix`.
+  # Returns a tree { fileName-without-suffix = path; dirName = { ... }; ... }
+  # mirroring the filesystem. A subdirectory containing a `default<suffix>`
+  # file collapses to a single entry whose path is the directory itself --
+  # this is what makes `import ./foo` resolve for `.nix`; for other suffixes
+  # the collapse only triggers if you actually name a file `default.<suffix>`.
+  # Returns {} when `dir` is missing.
+  scanDir = suffix: dir: let
     entries = readDirSafe dir;
-    toImportableTree = name: type: let
+    suffixLen = builtins.stringLength suffix;
+    toEntry = name: type: let
       subPath = dir + "/${name}";
+      isMatchingFile = type == "regular" && hasSuffix suffix name;
       isDirectory = type == "directory";
-      isNixFile = type == "regular" && hasSuffix ".nix" name;
-      withoutExtension = builtins.substring 0 ((builtins.stringLength name) - 4) name;
-      defaultExists = builtins.pathExists (subPath + "/default.nix");
-      dirContent = getImportableTree subPath;
+      withoutSuffix = builtins.substring 0 ((builtins.stringLength name) - suffixLen) name;
+      defaultExists = builtins.pathExists (subPath + "/default${suffix}");
+      dirContent = scanDir suffix subPath;
     in
-      if isNixFile
-      then {"${withoutExtension}" = subPath;}
+      if isMatchingFile
+      then {${withoutSuffix} = subPath;}
       else if isDirectory && defaultExists
-      then {"${name}" = subPath;}
+      then {${name} = subPath;}
       else if isDirectory && !isEmptySet dirContent
-      then {"${name}" = dirContent;}
+      then {${name} = dirContent;}
       else {};
   in
-    mergeFold toImportableTree entries;
+    mergeFold toEntry entries;
+
+  # Scanning for `.nix` files is the scaffold's bread and butter, so we
+  # keep a named alias for internal use.
+  getImportableTree = scanDir ".nix";
 
   # Borrowed from flake-utils.
   # A common case is to build the same structure for each system.
@@ -313,5 +323,5 @@ let
 in
   # these are the "public exports" of this library
   {
-    inherit eachSystem mkFlake mergeFold;
+    inherit eachSystem mkFlake mergeFold scanDir;
   }
