@@ -327,9 +327,13 @@ let
     # By default, we apply a universal overlay that tucks all internal packages under
     # a series of isolated nested scopes, named after the `namespace` config.
     # We also make sure to include our internal libs, and inputs.
-    defaultUniversalOverlay = final: prev: {
+    defaultUniversalOverlay = final: prev: let
+      existingNamespace = prev.${namespace} or {};
+      existingLibNamespace = prev.lib.${namespace} or {};
+      newLib = {${namespace} = internalLibsDefaultFlattened // existingLibNamespace;};
+    in {
       inputs = inputs;
-      lib = prev.lib // {${namespace} = internalLibsDefaultFlattened;};
+      lib = prev.lib // newLib;
       # Merge with any existing namespace scope so multiple scaffold flakes can
       # coexist in the same pkgs (e.g. a downstream flake importing a module
       # from an upstream scaffold flake using the same namespace).
@@ -345,13 +349,10 @@ let
       # If `prev.${namespace}` exists but isn't an attrset we throw rather
       # than silently dropping it -- it's almost certainly a namespace
       # config conflict the user wants to know about.
-      ${namespace} = let
-        existing = prev.${namespace} or {};
-      in
-        if !builtins.isAttrs existing
-        then
-          throw "scaffold: pkgs.${namespace} is already set to a non-attrset value; choose a different `namespace` in mkFlake to avoid the conflict."
-        else createNestedScopes prev packageTree // existing;
+      ${namespace} =
+        if !builtins.isAttrs existingNamespace
+        then throw "scaffold: pkgs.${namespace} is already set to a non-attrset value; choose a different `namespace` in mkFlake to avoid the conflict."
+        else createNestedScopes prev packageTree // existingNamespace;
     };
 
     # we apply the universal overlay to nixosConfigurations via this universal module.
